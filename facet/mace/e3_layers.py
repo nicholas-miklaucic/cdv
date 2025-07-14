@@ -2,14 +2,12 @@
 
 from collections import defaultdict
 from typing import Callable, Literal
+
 import e3nn_jax as e3nn
 import jax.numpy as jnp
-
-from facet.layers import Context, E3Irreps, E3IrrepsArray
 from flax import linen as nn
-from eins import Reductions as R
 
-from facet.utils import debug_structure
+from facet.layers import Context, DyTanh, E3Irreps, E3IrrepsArray
 
 
 def Linear(*args, **kwargs):
@@ -194,6 +192,18 @@ class E3LayerNorm(nn.Module):
 
         out = e3nn.from_chunks(x.irreps, out_chunks, leading_shape=x.shape[:-1])
         return out * learned_scale
+
+
+class E3DyTanh(nn.Module):
+    """E3-equivariant version of DyTanh layer, operating on norms."""
+
+    inner: DyTanh
+
+    @nn.compact
+    def __call__(self, x: E3IrrepsArray, ctx: Context):
+        norm = e3nn.norm(x).array
+        new_norm = self.inner(norm)
+        return x * (new_norm / (norm + 1e-6))
 
 
 class E3SoftNorm(nn.Module):

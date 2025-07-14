@@ -1,10 +1,11 @@
 batch_size = 32
 stack_size = 1
-num_epochs = 25
+num_epochs = 5
 precision = "f32"
 debug_mode = false
 do_profile = false
 display = "progress"
+checkpoint_params = "precomputed/enb-219.ckpt"
 
 [data]
 dataset_name = "mptrj"
@@ -47,6 +48,7 @@ steps_between_ema = 32
 
 [model]
 residual = true
+resid_norm = "identity"
 resid_init = "zeros"
 hidden_irreps = [
     "128x0e + 32x1e + 16x2e + 8x3e",
@@ -56,6 +58,7 @@ outs_per_node = 128
 block_reduction = "last"
 share_species_embed = true
 norm = "identity"
+use_adapter = true
 
 [train.loss]
 energy_weight = 1.0
@@ -110,6 +113,16 @@ inner_dims = []
 activation = "silu"
 final_activation = "Identity"
 dropout = 0.15
+residual = false
+num_heads = 1
+use_bias = false
+normalization = "Identity"
+
+[model.head_adapter]
+inner_dims = [128]
+activation = "silu"
+final_activation = "Identity"
+dropout = 0.2
 residual = false
 num_heads = 1
 use_bias = false

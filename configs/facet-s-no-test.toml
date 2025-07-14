@@ -1,6 +1,6 @@
 batch_size = 32
 stack_size = 1
-num_epochs = 25
+num_epochs = 50
 precision = "f32"
 debug_mode = false
 do_profile = false
@@ -10,9 +10,9 @@ display = "progress"
 dataset_name = "mptrj"
 raw_data_folder = "data"
 data_folder = "precomputed"
-shuffle_seed = 29205
-train_split = 30
-test_split = 3
+shuffle_seed = 42
+train_split = 33
+test_split = 0
 valid_split = 3
 batches_per_group = 0
 k = 32
@@ -64,7 +64,7 @@ stress_weight = 0.0
 
 [train.lr_schedule]
 kind = "polynomial"
-warmup_frac = 0.04
+warmup_frac = 0.02
 start_lr = 0.01
 end_lr = 0.01
 power = 1.0
@@ -137,8 +137,8 @@ radial_power = 0.7
 
 [model.self_connection.s2_grid]
 activation = "silu"
-res_beta = 36
-res_alpha = 35
+res_beta = 18
+res_alpha = 17
 normalization = "integral"
 quadrature = "soft"
 use_fft = false

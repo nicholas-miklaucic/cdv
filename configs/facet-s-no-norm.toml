@@ -47,6 +47,7 @@ steps_between_ema = 32
 
 [model]
 residual = true
+resid_norm = "identity"
 resid_init = "zeros"
 hidden_irreps = [
     "128x0e + 32x1e + 16x2e + 8x3e",

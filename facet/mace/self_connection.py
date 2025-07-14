@@ -1,17 +1,16 @@
 """Self-connection blocks for MACE."""
 
 from typing import Set, Union
-from flax import linen as nn
+
 import e3nn_jax as e3nn
 import jax
 import jax.numpy as jnp
-from jaxtyping import Float, Array
-
+from flax import linen as nn
+from jaxtyping import Array, Float
 
 from facet.e3.activations import S2Activation
-from facet.layers import Context, LazyInMLP, E3Irreps, E3IrrepsArray
+from facet.layers import Context, DyTanh, E3Irreps, E3IrrepsArray, LazyInMLP
 from facet.mace.e3_layers import IrrepsModule, Linear
-from facet.utils import debug_structure
 
 
 def safe_norm(x: jnp.ndarray, axis: int | None = None, keepdims=False) -> jnp.ndarray:
@@ -290,6 +289,7 @@ class S2SelfConnection(SelfConnectionBlock):
     act: S2Activation
     mlp: LazyInMLP
     num_heads: int
+    dytanh_prenorm: bool
 
     @nn.compact
     def __call__(
@@ -318,8 +318,8 @@ class S2SelfConnection(SelfConnectionBlock):
         vals = jnp.moveaxis(vals, -3, -1)
         vals = vals.reshape(*batch, beta, alpha, self.num_heads, -1)
 
-        # start with activation, because we just used a nonlinearity
-        # vals = jax.nn.silu(vals)
+        if self.dytanh_prenorm:
+            vals = DyTanh()(vals)
 
         # now apply MLP
         vals = self.mlp(vals, ctx=ctx)

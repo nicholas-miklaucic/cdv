@@ -4,6 +4,7 @@ Global data would also be incorporated here, but the two are mostly orthogonal.
 """
 
 from flax import linen as nn
+from facet.data.metadata import DatasetMetadata
 from facet.mace.e3_layers import E3IrrepsArray, IrrepsModule
 from facet.layers import Context
 from jaxtyping import Int, Array
@@ -36,25 +37,25 @@ class LinearNodeEmbedding(NodeEmbedding):
         return E3IrrepsArray(self.ir_out, self.embed(node_species))
 
 
-class SevenNetEmbedding(NodeEmbedding):
-    """Embedding locked to a projection from the SevenNet parameters."""
+class CTUAEEmbedding(NodeEmbedding):
+    """Embedding locked to the CT-UAE formation energy results (DOI: 10.5281/zenodo.14557908)."""
+
+    metadata: DatasetMetadata
 
     def setup(self):
         if self.ir_out.lmax > 0:
             raise ValueError(
                 f'Irreps {self.ir_out.regroup()} should just be scalars for node embedding.'
             )
-        with open('data/sevennet_stats.json', 'r') as stats_file:
-            stats = json.load(stats_file)
+        if self.ir_out.num_irreps != 128:
+            raise ValueError('CT-UAE embeddings are 128-dimensional, other sizes do not work')
 
+        # data is atomic numbers 1-100
+        # our atomic numbers start with a 0, so pad
         with jax.ensure_compile_time_eval():
-            self.inds = jnp.zeros((max(stats['atomic_numbers']) + 1,), dtype=jnp.uint32)
-            self.inds = self.inds.at[jnp.array(stats['atomic_numbers'], dtype=jnp.uint32)].set(
-                jnp.arange(len(stats['atomic_numbers']), dtype=jnp.uint32)
-            )
-            self.emb = jnp.array(np.load('data/sevennet_embs.npy'))
-
-        self.proj = nn.Dense(self.ir_out.dim, use_bias=True)
+            Z = jnp.load('precomputed/ct-uae-form.npy').astype(jnp.float32).T
+            Z = jnp.vstack([Z[:1] * 0, Z])
+            self.emb = Z[self.metadata.atomic_numbers]
 
     def __call__(self, node_species: Int[Array, ' nodes'], ctx: Context) -> E3IrrepsArray:
-        return E3IrrepsArray(self.ir_out, self.proj(self.emb[self.inds[node_species]]))
+        return E3IrrepsArray(self.ir_out, self.emb[node_species])

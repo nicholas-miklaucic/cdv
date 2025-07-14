@@ -3,10 +3,10 @@ from typing import Any, Callable, Optional
 import jax.numpy as jnp
 import pyrallis
 from flax import linen as nn
-from facet.config.common import dataclass
 from pyrallis.fields import field
 
 from facet import layers
+from facet.config.common import dataclass
 from facet.layers import Identity, LazyInMLP
 
 
@@ -63,7 +63,7 @@ class MLPConfig:
     # Whether to use a bias. Also applies to LayerNorm.
     use_bias: bool = False
 
-    # normalization: 'layer', 'weight', 'none'
+    # normalization: 'layer', 'weight', 'dytanh', 'none'
     normalization: str = 'layer'
 
     def build(self) -> LazyInMLP:

@@ -1,25 +1,24 @@
-from collections.abc import Sequence
 import logging
+from collections.abc import Sequence
 from typing import Optional, Union
 
-import jax.numpy as jnp
-import numpy as np
-from facet.config.common import dataclass
 import flax.linen as nn
+import numpy as np
 from pyrallis.fields import field
 
+from facet.config.common import dataclass
+from facet.config.utils import Const, Layer, MLPConfig
 from facet.data.metadata import DatasetMetadata
 from facet.e3.activations import S2Activation
-from facet.layers import Identity
 from facet.mace.e3_layers import E3LayerNorm, LinearAdapter, ResidualAdapter
 from facet.mace.edge_embedding import (
     BesselBasis,
-    SincBasis,
+    Envelope,
+    ExpCutoff,
+    GaussBasis,
     RadialBasis,
     RadialEmbeddingBlock,
-    GaussBasis,
-    ExpCutoff,
-    Envelope,
+    SincBasis,
     XPLORCutoff,
 )
 from facet.mace.mace import (
@@ -34,14 +33,13 @@ from facet.mace.message_passing import (
     SimpleInteraction,
     SimpleMixMLPConv,
 )
-from facet.mace.node_embedding import LinearNodeEmbedding
+from facet.mace.node_embedding import CTUAEEmbedding, LinearNodeEmbedding, NodeEmbedding
 from facet.mace.self_connection import (
     GateSelfConnection,
     LinearSelfConnection,
     MLPSelfGate,
     S2SelfConnection,
 )
-from facet.config.utils import Const, Layer, MLPConfig
 
 
 @dataclass
@@ -228,7 +226,7 @@ class SimpleInteractionBlockConfig(InteractionConfig):
 class NodeEmbeddingConfig:
     embed_dim: int = 64
 
-    def build(self, metadata: DatasetMetadata) -> LinearNodeEmbedding:
+    def build(self, metadata: DatasetMetadata) -> NodeEmbedding:
         raise NotImplementedError
 
 
@@ -238,6 +236,14 @@ class LinearNodeEmbeddingConfig(NodeEmbeddingConfig):
 
     def build(self, metadata: DatasetMetadata) -> LinearNodeEmbedding:
         return LinearNodeEmbedding(f'{self.embed_dim}x0e', num_species=len(metadata.atomic_numbers))
+
+
+@dataclass
+class CTUAEEmbeddingConfig(NodeEmbeddingConfig):
+    kind: Const('ct-uae') = 'ct-uae'
+
+    def build(self, metadata: DatasetMetadata) -> CTUAEEmbedding:
+        return CTUAEEmbedding(f'{self.embed_dim}x0e', metadata)
 
 
 @dataclass
@@ -308,6 +314,7 @@ class S2MLPMixerConfig(SelfConnectionConfig):
 
     s2_grid: S2ActivationConfig = field(default_factory=S2ActivationConfig)
     mlp: MLPConfig = field(default_factory=MLPConfig)
+    dytanh_prenorm: bool = False
 
     def build(self) -> S2SelfConnection:
         return S2SelfConnection(
@@ -315,6 +322,7 @@ class S2MLPMixerConfig(SelfConnectionConfig):
             act=self.s2_grid.build(),
             mlp=self.mlp.build(),
             num_heads=self.mlp.num_heads,
+            dytanh_prenorm=self.dytanh_prenorm,
         )
 
 
@@ -397,7 +405,9 @@ class IrrepsConfig:
 
 @dataclass
 class MACEConfig:
-    node_embed: Union[LinearNodeEmbeddingConfig] = field(default_factory=LinearNodeEmbeddingConfig)
+    node_embed: Union[LinearNodeEmbeddingConfig, CTUAEEmbeddingConfig] = field(
+        default_factory=LinearNodeEmbeddingConfig
+    )
     edge_embed: RadialEmbeddingConfig = field(default_factory=RadialEmbeddingConfig)
     interaction: Union[SimpleInteractionBlockConfig] = field(
         default_factory=SimpleInteractionBlockConfig
@@ -420,7 +430,18 @@ class MACEConfig:
         )
     )
 
+    use_adapter: bool = False
+    head_adapter: MLPConfig = field(
+        default_factory=lambda: MLPConfig(
+            inner_dims=[],
+            final_activation='Identity',
+            out_dim=0,
+            use_bias=False,
+        )
+    )
+
     residual: bool = True
+    resid_norm: str = 'layer'
     resid_init: str = 'zeros'
     hidden_irreps: Union[IrrepsConfig, tuple[str, ...]] = field(default_factory=IrrepsConfig)
     outs_per_node: int = 64
@@ -456,8 +477,10 @@ class MACEConfig:
             share_species_embed=self.share_species_embed,
             block_reduction=self.block_reduction,
             residual=self.residual,
+            resid_norm=self.resid_norm,
             precision=precision,  # type: ignore
             resid_init=Layer(name=self.resid_init).build(),
             dataset_metadata=metadata,
             norm=norm,
+            head_adapter_templ=self.head_adapter.build() if self.use_adapter else None,
         )

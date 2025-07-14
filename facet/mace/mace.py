@@ -3,37 +3,39 @@ MACE network code. Adapted from https://github.com/ACEsuit/mace-jax.
 """
 
 from collections.abc import Sequence
-from os import PathLike
-from pathlib import Path
 from typing import Callable, Literal
-from flax import linen as nn
+
 import e3nn_jax as e3nn
 import jax
 import jax.numpy as jnp
-from jaxtyping import Float, Array, Int
-import json
 from eins import EinsOp
+from flax import linen as nn
+from jaxtyping import Array, Float
 
 from facet.data.databatch import CrystalGraphs
 from facet.data.metadata import DatasetMetadata
-from facet.mace.e3_layers import (
-    E3LayerNorm,
-    E3SoftNorm,
-    IrrepsModule,
-    Linear,
-    LinearAdapter,
-    ResidualAdapter,
-    ResidualLinearAdapter,
+from facet.layers import (
+    Context,
+    DyTanh,
+    E3Irreps,
+    E3IrrepsArray,
+    LazyInMLP,
+    SegmentReduction,
+    edge_vecs,
 )
-from facet.layers import SegmentReduction, SegmentReductionKind
-from facet.layers import Context, LazyInMLP, E3Irreps, E3IrrepsArray, edge_vecs
+from facet.mace.e3_layers import (
+    E3DyTanh,
+    E3LayerNorm,
+    IrrepsModule,
+    ResidualAdapter,
+)
 from facet.mace.edge_embedding import RadialEmbeddingBlock
 from facet.mace.message_passing import ResidualInteraction, SimpleInteraction
 from facet.mace.node_embedding import NodeEmbedding
 from facet.mace.self_connection import (
     SelfConnectionBlock,
 )
-from facet.utils import debug_stat, debug_structure, get_or_init, load_pytree
+from facet.utils import get_or_init
 
 
 def safe_norm(x: jnp.ndarray, axis: int | None = None, keepdims=False) -> jnp.ndarray:
@@ -72,10 +74,16 @@ class SpeciesWiseRescale(nn.Module):
 
     def setup(self):
         self.scale = get_or_init(
-            self, 'scale', jnp.array(self.metadata.atomwise_scale_energy), self.scale_trainable
+            self,
+            'scale',
+            jnp.array(self.metadata.atomwise_scale_energy),
+            self.scale_trainable,
         )
         self.shift = get_or_init(
-            self, 'shift', jnp.array(self.metadata.atomwise_shift_energy), self.shift_trainable
+            self,
+            'shift',
+            jnp.array(self.metadata.atomwise_shift_energy),
+            self.shift_trainable,
         )
         self.global_scale = get_or_init(
             self,
@@ -121,6 +129,7 @@ class MACELayer(nn.Module):
     readout: IrrepsModule | None
     residual: bool
     resid_init: Callable
+    resid_norm: str
     norm: nn.Module | None
 
     @nn.compact
@@ -143,15 +152,23 @@ class MACELayer(nn.Module):
         x = self.self_connection(x, node_species, species_embed, ctx)
 
         if self.residual:
-            x = E3LayerNorm(
-                separation='scalars',
-                scale_init=self.resid_init,
-                learned_scale=True,
-                name='resid_ln',
-            )(x, ctx)
+            if self.resid_norm == 'layer':
+                x = E3LayerNorm(
+                    separation='scalars',
+                    scale_init=self.resid_init,
+                    learned_scale=True,
+                    name='resid_ln',
+                )(x, ctx)
+            elif self.resid_norm == 'dytanh':
+                x = E3DyTanh(DyTanh(scale_init=self.resid_init, name='resid_dytanh'))(x, ctx)
+            elif self.resid_norm == 'identity':
+                pass
+            else:
+                raise ValueError(f'Unknown residual norm kind {self.resid_norm}')
             # resid = ResidualLinearAdapter(x.irreps)(node_feats, ctx=ctx)
             resid = ResidualAdapter(x.irreps)(node_feats, ctx=ctx)
             x = x + resid
+            # x = E3DyTanh(DyTanh(scale_init=nn.initializers.ones, name='resid_dytanh'))(x, ctx)
 
         if self.norm is not None:
             # norm_mod = E3LayerNorm(
@@ -177,6 +194,7 @@ class MACE(IrrepsModule):
     only_last_readout: bool
     share_species_embed: bool
     residual: bool
+    resid_norm: str
     resid_init: Callable
     dataset_metadata: DatasetMetadata
     norm: nn.Module | None
@@ -208,6 +226,7 @@ class MACE(IrrepsModule):
                     readout=readout,
                     residual=self.residual,
                     resid_init=self.resid_init,
+                    resid_norm=self.resid_norm,
                     name=f'layer_{i}',
                     norm=self.norm,
                 )
@@ -278,7 +297,9 @@ class MaceModel(nn.Module):
     self_connection: SelfConnectionBlock
     readout: IrrepsModule
     head_templ: LazyInMLP
+    head_adapter_templ: LazyInMLP | None
     residual: bool
+    resid_norm: str
     resid_init: Callable
     rescale: nn.Module
     dataset_metadata: DatasetMetadata
@@ -307,17 +328,21 @@ class MaceModel(nn.Module):
             resid_init=self.resid_init,
             dataset_metadata=self.dataset_metadata,
             norm=self.norm,
+            resid_norm=self.resid_norm,
         )
 
         self.head = self.head_templ.copy(out_dim=1, name='head')
+        if self.head_adapter_templ is None:
+            self.head_adapter = None
+        else:
+            self.head_adapter = self.head_adapter_templ.copy(
+                out_dim=1, name='head_adapter', kernel_init=nn.initializers.normal(stddev=1e-3)
+            )
+
         self.dtype = jnp.float32 if self.precision == 'f32' else jnp.bfloat16
         self.head_dropout = nn.Dropout(self.head_templ.dropout_rate)
 
-    def __call__(
-        self,
-        cg: CrystalGraphs,
-        ctx: Context,
-    ) -> Float[Array, ' graphs 1']:
+    def head_outputs(self, cg: CrystalGraphs, ctx: Context) -> Float[Array, ' graphs head']:
         vecs = edge_vecs(cg).astype(self.dtype)
 
         # shape [n_nodes, n_interactions, output_irreps]
@@ -333,8 +358,22 @@ class MaceModel(nn.Module):
         else:
             out = EinsOp('nodes blocks mul -> nodes mul', reduce=self.block_reduction)(mace_out)
 
-        # out = self.norm(out)
+        return out
 
+    def energy_head(self, out, cg: CrystalGraphs, ctx: Context):
         out = self.head_dropout(out, deterministic=not ctx.training)
         mlp_out = self.head(out, ctx=ctx)[..., 0]
+        if self.head_adapter is None:
+            mlp_out = mlp_out
+        else:
+            mlp_out = mlp_out + self.head_adapter(out, ctx=ctx)[..., 0]
         return self.rescale(cg, mlp_out, ctx=ctx)
+
+    def __call__(
+        self,
+        cg: CrystalGraphs,
+        ctx: Context,
+    ) -> Float[Array, ' graphs 1']:
+        out = self.head_outputs(cg, ctx)
+
+        return self.energy_head(out, cg, ctx)

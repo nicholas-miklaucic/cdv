@@ -1,10 +1,10 @@
-from dataclasses import field
 import functools as ft
 import logging
 import random
 import shutil
 import time
 from collections import defaultdict
+from dataclasses import field
 from datetime import datetime, timedelta
 from os import PathLike
 from pathlib import Path
@@ -14,24 +14,23 @@ from typing import Any, Literal, Mapping, Sequence, Union
 import chex
 import jax
 import jax.numpy as jnp
+import neptune  # type: ignore
 import numpy as np
 import optax  # type: ignore
 import orbax.checkpoint as ocp  # type: ignore
 import pandas as pd
 import pyrallis
-from flax import struct
 from flax import linen as nn
+from flax import struct
 from flax.training import train_state
+from neptune.types import File  # type: ignore
 
 from facet.checkpointing import best_ckpt
 from facet.config import LossConfig, MainConfig
 from facet.data.dataset import CrystalGraphs, dataloader
 from facet.layers import Context
 from facet.model_summary import model_summary
-from facet.utils import debug_stat, debug_structure, get_nested_path, item_if_arr, load_pytree
-
-import neptune  # type: ignore
-from neptune.types import File  # type: ignore
+from facet.utils import get_nested_path, item_if_arr, load_pytree
 
 
 @struct.dataclass
@@ -158,7 +157,7 @@ class TrainingRun:
 
     @staticmethod
     @ft.partial(jax.jit, static_argnames=('config',))
-    @chex.assert_max_traces(2)
+    @chex.assert_max_traces(4)
     def compute_metrics(
         config: LossConfig,
         state: TrainState,
@@ -180,7 +179,8 @@ class TrainingRun:
 
         from jax.experimental import mesh_utils
         from jax.experimental.shard_map import shard_map
-        from jax.sharding import Mesh, PartitionSpec as P
+        from jax.sharding import Mesh
+        from jax.sharding import PartitionSpec as P
 
         devs = jax.local_devices()
         mesh = Mesh(mesh_utils.create_device_mesh([len(devs)], devices=devs), 'batch')
@@ -215,7 +215,8 @@ class TrainingRun:
         """Train for a single step."""
         from jax.experimental import mesh_utils
         from jax.experimental.shard_map import shard_map
-        from jax.sharding import Mesh, PartitionSpec as P
+        from jax.sharding import Mesh
+        from jax.sharding import PartitionSpec as P
 
         devs = jax.local_devices()
         mesh = Mesh(mesh_utils.create_device_mesh([len(devs)], devices=devs), 'batch')

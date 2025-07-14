@@ -1,6 +1,7 @@
 batch_size = 32
 stack_size = 1
-num_epochs = 25
+num_epochs = 12
+checkpoint_params = "precomputed/sevennet-trimmed-emb8-linhead.ckpt"
 precision = "f32"
 debug_mode = false
 do_profile = false
@@ -32,26 +33,18 @@ logs_per_epoch = 32
 epochs_per_ckpt = 2
 epochs_per_valid = 0.5
 tags = []
-log_params = [
-    "edge_embedding/basis/mu",
-    "edge_embedding/basis/sigma",
-    "edge_embedding/basis/freq",
-    "edge_embedding/rmax",
-]
+log_params = [ "edge_embedding/basis/mu", "edge_embedding/basis/sigma", "edge_embedding/basis/freq", "edge_embedding/rmax",]
 
 [train]
-base_lr = 1.0
-max_grad_norm = 1.0
+base_lr = 1e-5
+max_grad_norm = 0.3
 ema_gamma = 0.99
-steps_between_ema = 32
+steps_between_ema = 16
 
 [model]
-residual = true
+residual = false
 resid_init = "zeros"
-hidden_irreps = [
-    "128x0e + 32x1e + 16x2e + 8x3e",
-    "128x0e + 32x1e + 16x2e + 8x3e",
-]
+hidden_irreps = [ "128x0e + 64x1e + 32x2e", "128x0e + 64x1e + 32x2e", "128x0e + 64x1e + 32x2e", "128x0e + 64x1e + 32x2e",]
 outs_per_node = 128
 block_reduction = "last"
 share_species_embed = true
@@ -65,16 +58,19 @@ stress_weight = 0.0
 [train.lr_schedule]
 kind = "polynomial"
 warmup_frac = 0.04
-start_lr = 0.01
-end_lr = 0.01
+start_lr = 0.99
+end_lr = 0.99
 power = 1.0
 
 [train.optimizer]
 base_lr = 1.0
-kind = "prodigy"
-weight_decay = 1e-4
+kind = "adamw"
+weight_decay = 0.0
 beta_1 = 0.9
-beta_2 = 0.999
+beta_2 = 0.98
+nesterov = false
+mechanize = false
+schedule_free = false
 
 [model.node_embed]
 embed_dim = 128
@@ -88,28 +84,24 @@ radius_transform = "Identity"
 [model.interaction]
 residual = true
 kind = "simple"
-linear_intro = false
+linear_intro = true
 linear_outro = true
 
 [model.readout]
 kind = "identity"
 
 [model.self_connection]
-kind = "s2-mlp-mixer"
-dytanh_prenorm = false
+kind = "gate"
 
 [model.rescale]
-kind = "species-wise"
-scale_trainable = true
-shift_trainable = true
-global_scale_trainable = true
-global_shift_trainable = true
+kind = "sevennet"
 
 [model.head]
 inner_dims = []
-activation = "silu"
+activation = "Identity"
 final_activation = "Identity"
-dropout = 0.15
+out_dim = 0
+dropout = 0.0
 residual = false
 num_heads = 1
 use_bias = false
@@ -126,37 +118,18 @@ freq_trainable = true
 use_sinc = true
 
 [model.edge_embed.envelope]
-kind = "exp"
-cutoff_start = 0.8
-c = 0.1
+kind = "xplor"
+cutoff_start = 0.9
 
 [model.interaction.message]
 kind = "sevennet-conv"
-max_ell = 3
-radial_power = 0.7
-
-[model.self_connection.s2_grid]
-activation = "silu"
-res_beta = 36
-res_alpha = 35
-normalization = "integral"
-quadrature = "soft"
-use_fft = false
-
-[model.self_connection.mlp]
-inner_dims = [16]
-activation = "silu"
-final_activation = "silu"
-dropout = 0.0
-residual = false
-num_heads = 2
-use_bias = false
-normalization = "Identity"
+max_ell = 2
 
 [model.interaction.message.radial_weight]
 inner_dims = []
-activation = "silu"
+activation = "normalized_silu"
 final_activation = "Identity"
+out_dim = 0
 dropout = 0.0
 residual = false
 num_heads = 1

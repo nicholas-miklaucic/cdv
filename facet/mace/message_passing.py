@@ -1,22 +1,21 @@
-from typing import Callable
-from flax import linen as nn
+import functools as ft
+import operator
+
+import e3nn_jax as e3nn
+import jax
 import jax.experimental
+import jax.numpy as jnp
+from e3nn_jax.legacy import FunctionalTensorProduct
+from flax import linen as nn
+
+from facet.layers import Context, DyTanh, LazyInMLP
 from facet.mace.e3_layers import (
+    E3DyTanh,
     E3Irreps,
     E3IrrepsArray,
     IrrepsModule,
     Linear,
-    ResidualAdapter,
-    ResidualLinearAdapter,
 )
-import jax.numpy as jnp
-from e3nn_jax.legacy import FunctionalTensorProduct
-import e3nn_jax as e3nn
-from facet.layers import Context, LazyInMLP
-from facet.utils import debug_stat, debug_structure
-import jax
-import functools as ft
-import operator
 
 
 class MPConv(IrrepsModule):
@@ -416,7 +415,7 @@ class SimpleInteraction(IrrepsModule):
         receivers: jnp.ndarray,  # [n_edges, ]
         avg_num_neighbors: jnp.ndarray,  # 1
         ctx: Context,
-    ) -> tuple[E3IrrepsArray, E3IrrepsArray]:
+    ) -> E3IrrepsArray:
         """-> n_nodes irreps"""
         if self.linear_intro:
             new_node_feats = Linear(node_feats.irreps, name='linear_intro')(node_feats)
@@ -447,7 +446,7 @@ class ResidualInteraction(IrrepsModule):
         receivers: jnp.ndarray,  # [n_edges, ]
         avg_num_neighbors: jnp.ndarray,  # 1
         ctx: Context,
-    ) -> tuple[E3IrrepsArray, E3IrrepsArray]:
+    ) -> E3IrrepsArray:
         """-> n_nodes irreps"""
         resid = Linear(self.ir_out, name='resid_adapter', force_irreps_out=True)(node_feats)
         new_node_feats = self.interaction.copy(irreps_out=self.ir_out)(
@@ -459,4 +458,6 @@ class ResidualInteraction(IrrepsModule):
             ctx=ctx,
         )
 
-        return new_node_feats + resid  # [n_nodes, target_irreps]
+        x = new_node_feats + resid
+        # x = E3DyTanh(DyTanh())(x, ctx)
+        return x

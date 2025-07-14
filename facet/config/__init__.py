@@ -91,8 +91,11 @@ class DataConfig:
         return (self.batch_n_nodes, self.k, self.batch_n_graphs)
 
     @property
-    def metadata(self) -> DatasetMetadata:
-        return DatasetMetadata(**load_pytree(self.dataset_folder / 'metadata.mpk'))
+    def metadata(self) -> DatasetMetadata | None:
+        try:
+            return DatasetMetadata(**load_pytree(self.dataset_folder / 'metadata.mpk'))
+        except FileNotFoundError:
+            return None
 
     def __post_init__(self):
         pass
@@ -576,8 +579,8 @@ class MainConfig:
         import warnings
 
         warnings.filterwarnings(message='Explicitly requested dtype', action='ignore')
-        if not self.log.log_dir.exists():
-            raise ValueError(f'Log directory {self.log.log_dir} does not exist!')
+        # if not self.log.log_dir.exists():
+        #     raise ValueError(f'Log directory {self.log.log_dir} does not exist!')
 
         from jax.experimental.compilation_cache.compilation_cache import set_cache_dir
 

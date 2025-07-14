@@ -102,7 +102,7 @@ class LazyInMLP(nn.Module):
     dropout_rate: float = 0.0
     kernel_init: Callable = nn.initializers.glorot_normal()
     bias_init: Callable = nn.initializers.truncated_normal()
-    normalization: Literal['layer', 'weight', 'none'] = 'layer'
+    normalization: Literal['layer', 'weight', 'dytanh', 'none'] = 'layer'
     use_bias: bool = True
 
     @tcheck
@@ -150,6 +150,8 @@ class LazyInMLP(nn.Module):
             x = nn.Dropout(self.dropout_rate, deterministic=not ctx.training)(x)
             if self.normalization == 'layer':
                 x = nn.LayerNorm(dtype=x.dtype, use_bias=self.use_bias)(x)
+            elif self.normalization == 'dytanh':
+                x = DyTanh()(x)
             _curr_dim = next_dim
 
         x = Dense(out_dim)(x)
@@ -167,6 +169,23 @@ class LazyInMLP(nn.Module):
             x = e3nn.IrrepsArray(e3nn.Irreps(f'{x.shape[-1]}x0e'), x)
 
         return x
+
+
+class DyTanh(nn.Module):
+    """Dynamic tanh layer used in "Transformers without Normalization":
+    https://arxiv.org/abs/2503.10622"""
+
+    alpha_init: float = 0.5
+    scale_init: Callable = nn.initializers.ones
+
+    @nn.compact
+    def __call__(self, x: jax.Array) -> jax.Array:
+        """Applies tanh and then scales/shifts."""
+        alpha = self.param('alpha', nn.initializers.constant(self.alpha_init), (1,))
+        gamma = self.param('gamma', self.scale_init, x.shape[-1:])
+        beta = self.param('beta', nn.initializers.zeros, x.shape[-1:])
+
+        return gamma * jnp.tanh(jnp.clip(alpha * x, -5, 5)) + beta
 
 
 class E3NormNorm(nn.Module):

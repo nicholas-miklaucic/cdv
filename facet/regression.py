@@ -1,15 +1,13 @@
 """Loss function for formation energy/force/stress regression."""
 
 from typing import Callable
+
 import jax
 import jax.numpy as jnp
-
-from flax import linen as nn
 from flax.struct import PyTreeNode
+from jaxtyping import Array, Float
 
 from facet.data.databatch import CrystalGraphs
-from facet.layers import Context
-from jaxtyping import Float, Array
 
 
 class EFSOutput(PyTreeNode):
@@ -101,8 +99,8 @@ class EFSLoss(PyTreeNode):
         loss = {
             'energy': self.loss_fn(pred.energy[..., 0], cg.e_form, cg.padding_mask),
             'force': self.loss_fn(
-                jax.nn.tanh(pred.force),
-                jax.nn.tanh(cg.target_data.force),
+                pred.force,
+                cg.target_data.force,
                 cg.padding_mask[cg.nodes.graph_i],
             ),
             'stress': self.loss_fn(
